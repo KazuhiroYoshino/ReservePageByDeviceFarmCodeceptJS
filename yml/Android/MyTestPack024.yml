@@ -1,0 +1,112 @@
+version: 0.1
+
+# Phases are collection of commands that get executed on Device Farm.
+phases:
+  # The install phase includes commands that install dependencies that your tests use.
+  # Default dependencies for testing frameworks supported on Device Farm are already installed.
+  install:
+    commands:
+      # install node stable versoin
+      - nvm install stable
+
+      # Install npm packages by npm install to both globally and locally
+      - echo ">> Install npm packages by npm install to both globally and locally"
+      - cd $DEVICEFARM_TEST_PACKAGE_PATH
+      - export APPIUM_VERSION=1.16.0
+      - avm $APPIUM_VERSION
+      - ln -s /usr/local/avm/versions/$APPIUM_VERSION/node_modules/.bin/appium  /usr/local/avm/versions/$APPIUM_VERSION/node_modules/appium/bin/appium.js
+      - npm install -g chai
+      - npm install -g @wdio/cli
+#      - npm install -g date-fns
+#      - npm install -g codeceptjs webdriverio
+      - npm install
+
+  # The pre-test phase includes commands that setup your test environment.
+  # !!! This section has not modified from default/original template. (as of 2020/07) !!!
+  pre_test:
+    commands:
+      # We recommend starting appium server process in the background using the command below.
+      # Appium server log will go to $DEVICEFARM_LOG_DIR directory.
+      # The environment variables below will be auto-populated during run time.
+      - >-
+        if [ $DEVICEFARM_DEVICE_PLATFORM_NAME = "Android" ];
+        then
+        echo "Start appium server for android";
+        (appium --log-timestamp
+        --default-capabilities "{\"deviceName\": \"$DEVICEFARM_DEVICE_NAME\", \"platformName\":\"$DEVICEFARM_DEVICE_PLATFORM_NAME\",
+        \"app\":\"$DEVICEFARM_APP_PATH\", \"udid\":\"$DEVICEFARM_DEVICE_UDID\", \"platformVersion\":\"$DEVICEFARM_DEVICE_OS_VERSION\",
+        \"browserName\":\"Chrome\", \"chromedriverExecutable\":\"$DEVICEFARM_CHROMEDRIVER_EXECUTABLE\"}"
+        >> $DEVICEFARM_LOG_DIR/appiumlog.txt 2>&1 &);
+        fi
+
+      # For IOS, Device farm starts the ios-webkit-debug-proxy before starting the appium server.
+      # So don't start ios-webkit-debug-proxy in the yaml file.
+      # The default WDA used is at DEVICEFARM_WDA_DERIVED_DATA_PATH_V1 (Supports versions iOS 12 and below), it is using commit f865d3. See (https://github.com/appium/appium-xcuitest-driver/tree/f865d32e78a5a8a15469bee30ed2f985d378575d)
+      # If you need an older WDA version or need support for node modules, use the WDA at DEVICEFARM_WDA_DERIVED_DATA_PATH_V0. (This version does not suport iOS 12)
+
+      - >-
+        if [ $DEVICEFARM_DEVICE_PLATFORM_NAME = "iOS" ];
+        then
+        echo "Start appium server for iOS";
+        (appium --log-timestamp
+        --default-capabilities "{\"usePrebuiltWDA\": true, \"derivedDataPath\":\"$DEVICEFARM_WDA_DERIVED_DATA_PATH\",
+        \"deviceName\": \"$DEVICEFARM_DEVICE_NAME\", \"platformName\":\"$DEVICEFARM_DEVICE_PLATFORM_NAME\", \"app\":\"$DEVICEFARM_APP_PATH\",
+        \"automationName\":\"XCUITest\", \"udid\":\"$DEVICEFARM_DEVICE_UDID_FOR_APPIUM\", \"platformVersion\":\"$DEVICEFARM_DEVICE_OS_VERSION\", \"browserName\":\"Safari\"}"
+        >> $DEVICEFARM_LOG_DIR/appiumlog.txt 2>&1 &);
+        fi
+
+      - >-
+        start_appium_timeout=0;
+        while [ true ];
+        do
+            if [ $start_appium_timeout -gt 60 ];
+            then
+                echo "appium server never started in 60 seconds. Exiting";
+                exit 1;
+            fi;
+            grep -i "Appium REST http interface listener started on 0.0.0.0:4723" $DEVICEFARM_LOG_DIR/appiumlog.txt >> /dev/null 2>&1;
+            if [ $? -eq 0 ];
+            then
+                echo "Appium REST http interface listener started on 0.0.0.0:4723";
+                break;
+            else
+                echo "Waiting for appium server to start. Sleeping for 1 second";
+                sleep 1;
+                start_appium_timeout=$((start_appium_timeout+1));
+            fi;
+        done;
+
+  # The test phase includes commands that start your test suite execution.
+  test:
+    commands:
+      # Go into the root folder containing your source code and node_modules
+      - echo ">> Execute test with CodeceptJS"
+      - echo ""
+      - cd $DEVICEFARM_TEST_PACKAGE_PATH
+      - pwd
+      - ls -al
+      - echo "  [CHECK PARAMETERS]"
+      - echo "   >> DEVICEFARM_LOG_DIR=[" $DEVICEFARM_LOG_DIR/results "]"
+      - echo "   >> DEVICEFARM_APP_PATH=[" $DEVICEFARM_APP_PATH "]"
+      - echo "   >> DEVICEFARM_DEVICE_PLATFORM_NAME=[" $DEVICEFARM_DEVICE_PLATFORM_NAME "]"
+      - echo "   >> DEVICEFARM_DEVICE_OS_VERSION=[" $DEVICEFARM_DEVICE_OS_VERSION "]"
+      - echo "   >> DEVICEFARM_DEVICE_NAME=[" $DEVICEFARM_DEVICE_NAME "]"
+      - echo "[TestConf]"
+      - node -v
+      - appium -v
+
+      - node ./bin/pre_update_config.js $DEVICEFARM_LOG_DIR/output $DEVICEFARM_APP_PATH $DEVICEFARM_DEVICE_PLATFORM_NAME $DEVICEFARM_DEVICE_NAME $DEVICEFARM_DEVICE_OS_VERSION
+      - cat ./codecept.android.conf.json
+      - echo ""
+      - node ./node_modules/codeceptjs/bin/codecept.js run --debug --plugins retryFailedStep --steps --config=./codecept.android.conf.js
+
+  # The post test phase includes are commands that are run after your tests are executed.
+  post_test:
+    commands:
+
+# The artifacts phase lets you specify the location where your tests logs, device logs will be stored.
+# And also let you specify the location of your test logs and artifacts which you want to be collected by Device Farm.
+# These logs and artifacts will be available through ListArtifacts API in Device Farm.
+artifacts:
+  # By default, Device Farm will collect your artifacts from following directories
+  - $DEVICEFARM_LOG_DIR
